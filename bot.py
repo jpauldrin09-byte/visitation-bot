@@ -14,9 +14,10 @@ from telegram.ext import (
     filters,
 )
 
-# ==============================
+
+# ============================================================
 # CONFIGURATION
-# ==============================
+# ============================================================
 
 TOKEN = os.getenv("BOT_TOKEN")
 DB_FILE = "visitation.db"
@@ -37,23 +38,28 @@ PUROK_GROUPS = [
 ]
 
 
-# ==============================
+# ============================================================
 # RENDER HEALTH SERVER
-# ==============================
+# ============================================================
 
 class HealthHandler(BaseHTTPRequestHandler):
+
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Visitation Bot is running!")
+        self.wfile.write(
+            b"Visitation Bot is running!"
+        )
 
     def log_message(self, format, *args):
         return
 
 
 def run_web_server():
-    port = int(os.environ.get("PORT", 10000))
+    port = int(
+        os.environ.get("PORT", 10000)
+    )
 
     server = HTTPServer(
         ("0.0.0.0", port),
@@ -63,12 +69,14 @@ def run_web_server():
     server.serve_forever()
 
 
-# ==============================
+# ============================================================
 # DATABASE
-# ==============================
+# ============================================================
 
 def init_db():
+
     conn = sqlite3.connect(DB_FILE)
+
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -86,13 +94,27 @@ def init_db():
     conn.close()
 
 
-def add_visit(name, category, date_visited, purok, notes):
+def add_visit(
+    name,
+    category,
+    date_visited,
+    purok,
+    notes
+):
+
     conn = sqlite3.connect(DB_FILE)
+
     cursor = conn.cursor()
 
     cursor.execute("""
         INSERT INTO visits
-        (name, category, date_visited, purok_grupo, notes)
+        (
+            name,
+            category,
+            date_visited,
+            purok_grupo,
+            notes
+        )
         VALUES (?, ?, ?, ?, ?)
     """, (
         name,
@@ -107,7 +129,9 @@ def add_visit(name, category, date_visited, purok, notes):
 
 
 def get_all_visits():
+
     conn = sqlite3.connect(DB_FILE)
+
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -123,19 +147,414 @@ def get_all_visits():
     """)
 
     rows = cursor.fetchall()
+
     conn.close()
 
     return rows
 
 
-def get_week_visits():
-    today = datetime.now().date()
+# ============================================================
+# START
+# ============================================================
 
-    start = today - timedelta(
-        days=today.weekday()
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    keyboard = [
+        ["/add", "/records"],
+        ["/week"],
+    ]
+
+    await update.message.reply_text(
+
+        "👋 Welcome sa Visitation Record Bot!\n\n"
+
+        "Gamitin ang mga commands:\n\n"
+
+        "/add — Magdagdag ng visitation record\n"
+        "/records — Tingnan lahat ng records\n"
+        "/week — Tingnan ang Visited of the Week\n"
+        "/cancel — Kanselahin ang kasalukuyang entry",
+
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True,
+        ),
     )
 
+
+# ============================================================
+# ADD RECORD
+# ============================================================
+
+async def add_start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    await update.message.reply_text(
+
+        "📝 Magdagdag tayo ng visitation record.\n\n"
+        "Ilagay ang **Name**:",
+
+        parse_mode="Markdown",
+
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+    return NAME
+
+
+async def get_name(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    name = update.message.text.strip()
+
+    if not name:
+
+        await update.message.reply_text(
+            "❌ Pakilagay ang pangalan."
+        )
+
+        return NAME
+
+    context.user_data["name"] = name
+
+    keyboard = [
+        [category]
+        for category in CATEGORIES
+    ]
+
+    await update.message.reply_text(
+
+        "Piliin ang **Category**:",
+
+        parse_mode="Markdown",
+
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        ),
+    )
+
+    return CATEGORY
+
+
+async def get_category(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    category = update.message.text.strip()
+
+    if category not in CATEGORIES:
+
+        await update.message.reply_text(
+
+            "❌ Piliin lamang ang:\n"
+            "Tatay\n"
+            "Nanay\n"
+            "Anak\n"
+            "IND"
+        )
+
+        return CATEGORY
+
+    context.user_data["category"] = category
+
+    await update.message.reply_text(
+
+        "📅 Ilagay ang **Date Visited**.\n\n"
+
+        "Format: YYYY-MM-DD\n"
+        "Halimbawa: 2026-08-17",
+
+        parse_mode="Markdown",
+
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+    return DATE
+
+
+async def get_date(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    date_text = update.message.text.strip()
+
+    try:
+
+        datetime.strptime(
+            date_text,
+            "%Y-%m-%d",
+        )
+
+    except ValueError:
+
+        await update.message.reply_text(
+
+            "❌ Mali ang date format.\n\n"
+
+            "Gamitin:\n"
+            "YYYY-MM-DD\n\n"
+
+            "Halimbawa:\n"
+            "2026-08-17"
+        )
+
+        return DATE
+
+    context.user_data["date"] = date_text
+
+    keyboard = [
+        [purok]
+        for purok in PUROK_GROUPS
+    ]
+
+    await update.message.reply_text(
+
+        "📍 Piliin ang **Purok-Grupo**:",
+
+        parse_mode="Markdown",
+
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        ),
+    )
+
+    return PUROK
+
+
+async def get_purok(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    purok = update.message.text.strip()
+
+    if purok not in PUROK_GROUPS:
+
+        await update.message.reply_text(
+
+            "❌ Piliin lamang ang:\n"
+            "2-1\n"
+            "2-2\n"
+            "2-3"
+        )
+
+        return PUROK
+
+    context.user_data["purok"] = purok
+
+    await update.message.reply_text(
+
+        "📌 Ilagay ang **Notes**.\n\n"
+
+        "Kung walang notes, i-type ang `None`.",
+
+        parse_mode="Markdown",
+
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+    return NOTES
+
+
+async def get_notes(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    notes = update.message.text.strip()
+
+    if notes.lower() == "none":
+
+        notes = ""
+
+    context.user_data["notes"] = notes
+
+    add_visit(
+
+        context.user_data["name"],
+
+        context.user_data["category"],
+
+        context.user_data["date"],
+
+        context.user_data["purok"],
+
+        context.user_data["notes"],
+    )
+
+    await update.message.reply_text(
+
+        "✅ **Visitation record saved!**\n\n"
+
+        f"👤 Name: {context.user_data['name']}\n"
+        f"📂 Category: {context.user_data['category']}\n"
+        f"📅 Date: {context.user_data['date']}\n"
+        f"📍 Purok-Grupo: {context.user_data['purok']}\n"
+        f"📝 Notes: {context.user_data['notes'] or 'None'}",
+
+        parse_mode="Markdown",
+    )
+
+    context.user_data.clear()
+
+    return ConversationHandler.END
+
+
+# ============================================================
+# CANCEL
+# ============================================================
+
+async def cancel(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    context.user_data.clear()
+
+    await update.message.reply_text(
+
+        "❌ Pagdaragdag ng record ay kinansela.",
+
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+    return ConversationHandler.END
+
+
+# ============================================================
+# ALL RECORDS
+# ============================================================
+
+async def records(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    rows = get_all_visits()
+
+    if not rows:
+
+        await update.message.reply_text(
+            "📂 Wala pang visitation records."
+        )
+
+        return
+
+    text = (
+        "📋 **VISITATION RECORDS**\n\n"
+    )
+
+    for row in rows:
+
+        record_id, name, category, date, purok, notes = row
+
+        text += (
+
+            f"#{record_id}\n"
+
+            f"👤 {name}\n"
+
+            f"📂 {category}\n"
+
+            f"📅 {date}\n"
+
+            f"📍 {purok}\n"
+
+            f"📝 {notes or 'None'}\n"
+
+            "──────────────\n"
+        )
+
+    # Telegram message limit protection
+
+    chunks = []
+
+    while len(text) > 4000:
+
+        split_at = text.rfind(
+            "\n",
+            0,
+            4000,
+        )
+
+        if split_at == -1:
+
+            split_at = 4000
+
+        chunks.append(
+            text[:split_at]
+        )
+
+        text = text[split_at:]
+
+    chunks.append(text)
+
+    for chunk in chunks:
+
+        await update.message.reply_text(
+
+            chunk,
+
+            parse_mode="Markdown",
+        )
+
+
+# ============================================================
+# VISITED OF THE WEEK
+# AUTOMATIC YEAR + ISO WEEK
+# ============================================================
+
+async def week(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+
+    today = datetime.now().date()
+
+    # --------------------------------------------------------
+    # ISO CALENDAR
+    #
+    # Example:
+    # August 19, 2026 = Week 34
+    # Monday = first day of week
+    # Sunday = last day of week
+    # --------------------------------------------------------
+
+    iso_year, iso_week, iso_weekday = (
+        today.isocalendar()
+    )
+
+    # Monday of current week
+
+    start = today - timedelta(
+        days=iso_weekday - 1
+    )
+
+    # Sunday of current week
+
+    end = start + timedelta(
+        days=6
+    )
+
+    # --------------------------------------------------------
+    # GET RECORDS FOR CURRENT WEEK
+    # --------------------------------------------------------
+
     conn = sqlite3.connect(DB_FILE)
+
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -151,275 +570,95 @@ def get_week_visits():
         ORDER BY date_visited ASC, id ASC
     """, (
         start.isoformat(),
-        today.isoformat(),
+        end.isoformat(),
     ))
 
     rows = cursor.fetchall()
+
     conn.close()
 
-    return rows
+    # --------------------------------------------------------
+    # HEADER
+    # --------------------------------------------------------
 
+    text = (
 
-# ==============================
-# START
-# ==============================
+        "🏆 **VISITED OF THE WEEK**\n\n"
 
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    keyboard = [
-        ["/add", "/records"],
-        ["/week"],
-    ]
+        f"📅 **YEAR: {iso_year}**\n"
 
-    await update.message.reply_text(
-        "👋 Welcome sa Visitation Record Bot!\n\n"
-        "Gamitin ang mga commands:\n\n"
-        "/add — Magdagdag ng visitation record\n"
-        "/records — Tingnan lahat ng records\n"
-        "/week — Tingnan ang Visited of the Week\n"
-        "/cancel — Kanselahin ang kasalukuyang entry",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard,
-            resize_keyboard=True,
-        ),
+        f"🔢 **WEEK: {iso_week}**\n"
+
+        f"📆 {start.strftime('%B %d, %Y')} "
+        f"– {end.strftime('%B %d, %Y')}\n\n"
     )
 
-
-# ==============================
-# ADD RECORD
-# ==============================
-
-async def add_start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    await update.message.reply_text(
-        "📝 Magdagdag tayo ng visitation record.\n\n"
-        "Ilagay ang **Name**:",
-        parse_mode="Markdown",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-
-    return NAME
-
-
-async def get_name(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    name = update.message.text.strip()
-
-    if not name:
-        await update.message.reply_text(
-            "❌ Pakilagay ang pangalan."
-        )
-        return NAME
-
-    context.user_data["name"] = name
-
-    keyboard = [
-        [category]
-        for category in CATEGORIES
-    ]
-
-    await update.message.reply_text(
-        "Piliin ang **Category**:",
-        parse_mode="Markdown",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard,
-            resize_keyboard=True,
-            one_time_keyboard=True,
-        ),
-    )
-
-    return CATEGORY
-
-
-async def get_category(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    category = update.message.text.strip()
-
-    if category not in CATEGORIES:
-        await update.message.reply_text(
-            "❌ Piliin lamang ang:\n"
-            "Tatay\n"
-            "Nanay\n"
-            "Anak\n"
-            "IND"
-        )
-        return CATEGORY
-
-    context.user_data["category"] = category
-
-    await update.message.reply_text(
-        "📅 Ilagay ang **Date Visited**.\n\n"
-        "Format: YYYY-MM-DD\n"
-        "Halimbawa: 2026-08-17",
-        parse_mode="Markdown",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-
-    return DATE
-
-
-async def get_date(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    date_text = update.message.text.strip()
-
-    try:
-        datetime.strptime(
-            date_text,
-            "%Y-%m-%d",
-        )
-    except ValueError:
-        await update.message.reply_text(
-            "❌ Mali ang date format.\n\n"
-            "Gamitin:\n"
-            "YYYY-MM-DD\n\n"
-            "Halimbawa:\n"
-            "2026-08-17"
-        )
-        return DATE
-
-    context.user_data["date"] = date_text
-
-    keyboard = [
-        [purok]
-        for purok in PUROK_GROUPS
-    ]
-
-    await update.message.reply_text(
-        "📍 Piliin ang **Purok-Grupo**:",
-        parse_mode="Markdown",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard,
-            resize_keyboard=True,
-            one_time_keyboard=True,
-        ),
-    )
-
-    return PUROK
-
-
-async def get_purok(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    purok = update.message.text.strip()
-
-    if purok not in PUROK_GROUPS:
-        await update.message.reply_text(
-            "❌ Piliin lamang ang:\n"
-            "2-1\n"
-            "2-2\n"
-            "2-3"
-        )
-        return PUROK
-
-    context.user_data["purok"] = purok
-
-    await update.message.reply_text(
-        "📌 Ilagay ang **Notes**.\n\n"
-        "Kung walang notes, i-type ang `None`.",
-        parse_mode="Markdown",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-
-    return NOTES
-
-
-async def get_notes(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    notes = update.message.text.strip()
-
-    if notes.lower() == "none":
-        notes = ""
-
-    context.user_data["notes"] = notes
-
-    add_visit(
-        context.user_data["name"],
-        context.user_data["category"],
-        context.user_data["date"],
-        context.user_data["purok"],
-        context.user_data["notes"],
-    )
-
-    await update.message.reply_text(
-        "✅ **Visitation record saved!**\n\n"
-        f"👤 Name: {context.user_data['name']}\n"
-        f"📂 Category: {context.user_data['category']}\n"
-        f"📅 Date: {context.user_data['date']}\n"
-        f"📍 Purok-Grupo: {context.user_data['purok']}\n"
-        f"📝 Notes: {context.user_data['notes'] or 'None'}",
-        parse_mode="Markdown",
-    )
-
-    context.user_data.clear()
-
-    return ConversationHandler.END
-
-
-# ==============================
-# CANCEL
-# ==============================
-
-async def cancel(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    context.user_data.clear()
-
-    await update.message.reply_text(
-        "❌ Pagdaragdag ng record ay kinansela.",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-
-    return ConversationHandler.END
-
-
-# ==============================
-# RECORDS
-# ==============================
-
-async def records(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    rows = get_all_visits()
+    # --------------------------------------------------------
+    # NO RECORDS
+    # --------------------------------------------------------
 
     if not rows:
-        await update.message.reply_text(
-            "📂 Wala pang visitation records."
+
+        text += (
+            "📂 Wala pang visitation record "
+            "ngayong linggo."
         )
+
+        await update.message.reply_text(
+
+            text,
+
+            parse_mode="Markdown",
+        )
+
         return
 
-    text = "📋 **VISITATION RECORDS**\n\n"
+    # --------------------------------------------------------
+    # RECORDS
+    # --------------------------------------------------------
 
     for row in rows:
+
         record_id, name, category, date, purok, notes = row
 
         text += (
-            f"#{record_id}\n"
-            f"👤 {name}\n"
+
+            f"👤 **{name}**\n"
+
             f"📂 {category}\n"
+
             f"📅 {date}\n"
+
             f"📍 {purok}\n"
+
             f"📝 {notes or 'None'}\n"
+
             "──────────────\n"
         )
+
+    # --------------------------------------------------------
+    # SEND
+    # --------------------------------------------------------
+
+    # Telegram limit protection
+
+    if len(text) <= 4000:
+
+        await update.message.reply_text(
+
+            text,
+
+            parse_mode="Markdown",
+        )
+
+        return
+
+    # Split long message
 
     chunks = []
 
     while len(text) > 4000:
+
         split_at = text.rfind(
             "\n",
             0,
@@ -427,83 +666,61 @@ async def records(
         )
 
         if split_at == -1:
+
             split_at = 4000
 
-        chunks.append(text[:split_at])
+        chunks.append(
+            text[:split_at]
+        )
+
         text = text[split_at:]
 
     chunks.append(text)
 
     for chunk in chunks:
+
         await update.message.reply_text(
+
             chunk,
+
             parse_mode="Markdown",
         )
 
 
-# ==============================
-# VISITED OF THE WEEK
-# ==============================
-
-async def week(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    rows = get_week_visits()
-
-    if not rows:
-        await update.message.reply_text(
-            "📅 Wala pang visitation record ngayong linggo."
-        )
-        return
-
-    today = datetime.now().date()
-
-    start = today - timedelta(
-        days=today.weekday()
-    )
-
-    text = (
-        "🏆 **VISITED OF THE WEEK**\n\n"
-        f"Week: {start.isoformat()} "
-        f"hanggang {today.isoformat()}\n\n"
-    )
-
-    for row in rows:
-        record_id, name, category, date, purok, notes = row
-
-        text += (
-            f"👤 **{name}**\n"
-            f"📂 {category}\n"
-            f"📅 {date}\n"
-            f"📍 {purok}\n"
-            f"📝 {notes or 'None'}\n"
-            "──────────────\n"
-        )
-
-    await update.message.reply_text(
-        text,
-        parse_mode="Markdown",
-    )
-
-
-# ==============================
+# ============================================================
 # MAIN
-# ==============================
+# ============================================================
 
 def main():
+
+    # --------------------------------------------------------
+    # CHECK BOT TOKEN
+    # --------------------------------------------------------
+
     if not TOKEN:
+
         raise RuntimeError(
             "BOT_TOKEN environment variable is missing."
         )
 
+    # --------------------------------------------------------
+    # DATABASE
+    # --------------------------------------------------------
+
     init_db()
 
-    # Start Render health server
+    # --------------------------------------------------------
+    # RENDER HEALTH SERVER
+    # --------------------------------------------------------
+
     threading.Thread(
         target=run_web_server,
         daemon=True,
     ).start()
+
+    # --------------------------------------------------------
+    # TELEGRAM APPLICATION
+    # --------------------------------------------------------
 
     app = (
         Application
@@ -512,8 +729,14 @@ def main():
         .build()
     )
 
+    # --------------------------------------------------------
+    # ADD RECORD CONVERSATION
+    # --------------------------------------------------------
+
     conversation = ConversationHandler(
+
         entry_points=[
+
             CommandHandler(
                 "add",
                 add_start,
@@ -521,43 +744,55 @@ def main():
         ],
 
         states={
+
             NAME: [
+
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
+                    filters.TEXT
+                    & ~filters.COMMAND,
                     get_name,
                 )
             ],
 
             CATEGORY: [
+
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
+                    filters.TEXT
+                    & ~filters.COMMAND,
                     get_category,
                 )
             ],
 
             DATE: [
+
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
+                    filters.TEXT
+                    & ~filters.COMMAND,
                     get_date,
                 )
             ],
 
             PUROK: [
+
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
+                    filters.TEXT
+                    & ~filters.COMMAND,
                     get_purok,
                 )
             ],
 
             NOTES: [
+
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
+                    filters.TEXT
+                    & ~filters.COMMAND,
                     get_notes,
                 )
             ],
         },
 
         fallbacks=[
+
             CommandHandler(
                 "cancel",
                 cancel,
@@ -565,7 +800,12 @@ def main():
         ],
     )
 
+    # --------------------------------------------------------
+    # COMMAND HANDLERS
+    # --------------------------------------------------------
+
     app.add_handler(
+
         CommandHandler(
             "start",
             start,
@@ -573,6 +813,7 @@ def main():
     )
 
     app.add_handler(
+
         CommandHandler(
             "records",
             records,
@@ -580,22 +821,32 @@ def main():
     )
 
     app.add_handler(
+
         CommandHandler(
             "week",
             week,
         )
     )
 
-    app.add_handler(conversation)
+    app.add_handler(
+        conversation
+    )
 
-    print("Visitation Bot is running...")
+    # --------------------------------------------------------
+    # RUN BOT
+    # --------------------------------------------------------
+
+    print(
+        "Visitation Bot is running..."
+    )
 
     app.run_polling()
 
 
-# ==============================
+# ============================================================
 # RUN
-# ==============================
+# ============================================================
 
 if __name__ == "__main__":
+
     main()
