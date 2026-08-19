@@ -14,6 +14,7 @@ from telegram.ext import (
     filters,
 )
 
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -21,9 +22,18 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 DB_FILE = "visitation.db"
 
-# Conversation states
-VISIT_TYPE, FAMILY_NAME, FATHER, MOTHER, CHILDREN = range(5)
-IND_NAME, DATE, PUROK, NOTES = range(5, 9)
+(
+    VISIT_TYPE,
+    FAMILY_NAME,
+    FATHER,
+    MOTHER,
+    CHILDREN,
+    IND_NAME,
+    DATE,
+    PUROK,
+    NOTES,
+) = range(9)
+
 
 VISIT_TYPES = [
     "🏠 FAMILY",
@@ -38,6 +48,23 @@ PUROK_GROUPS = [
 
 
 # ============================================================
+# CANCEL KEYBOARD
+# ============================================================
+
+CANCEL_KEYBOARD = [
+    ["❌ CANCEL"]
+]
+
+
+def cancel_keyboard():
+    return ReplyKeyboardMarkup(
+        CANCEL_KEYBOARD,
+        resize_keyboard=True,
+        one_time_keyboard=False,
+    )
+
+
+# ============================================================
 # RENDER HEALTH SERVER
 # ============================================================
 
@@ -45,8 +72,12 @@ class HealthHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
+        self.send_header(
+            "Content-Type",
+            "text/plain"
+        )
         self.end_headers()
+
         self.wfile.write(
             b"Visitation Bot is running!"
         )
@@ -56,8 +87,12 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 
 def run_web_server():
+
     port = int(
-        os.environ.get("PORT", 10000)
+        os.environ.get(
+            "PORT",
+            10000
+        )
     )
 
     server = HTTPServer(
@@ -75,6 +110,7 @@ def run_web_server():
 def init_db():
 
     conn = sqlite3.connect(DB_FILE)
+
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -107,6 +143,7 @@ def add_family_visit(
 ):
 
     conn = sqlite3.connect(DB_FILE)
+
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -154,6 +191,7 @@ def add_individual_visit(
 ):
 
     conn = sqlite3.connect(DB_FILE)
+
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -193,6 +231,7 @@ def add_individual_visit(
 def get_all_visits():
 
     conn = sqlite3.connect(DB_FILE)
+
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -218,21 +257,46 @@ def get_all_visits():
     return rows
 
 
-def get_week_visits():
+# ============================================================
+# ISO WEEK
+# ============================================================
 
-    today = datetime.now().date()
+def get_week_dates(year, week_number):
 
-    iso_year, iso_week, iso_weekday = (
-        today.isocalendar()
+    try:
+
+        start = datetime.strptime(
+            f"{year}-W{week_number:02d}-1",
+            "%G-W%V-%u"
+        ).date()
+
+        end = start + timedelta(
+            days=6
+        )
+
+        return start, end
+
+    except ValueError:
+
+        return None, None
+
+
+def get_week_visits(
+    year,
+    week_number
+):
+
+    start, end = get_week_dates(
+        year,
+        week_number
     )
 
-    start = today - timedelta(
-        days=iso_weekday - 1
-    )
+    if not start:
 
-    end = start + timedelta(days=6)
+        return [], None, None
 
     conn = sqlite3.connect(DB_FILE)
+
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -259,13 +323,7 @@ def get_week_visits():
 
     conn.close()
 
-    return (
-        rows,
-        iso_year,
-        iso_week,
-        start,
-        end,
-    )
+    return rows, start, end
 
 
 # ============================================================
@@ -290,8 +348,10 @@ async def start(
 
         "/add — Magdagdag ng visitation\n"
         "/records — Tingnan lahat ng records\n"
-        "/week — Visited of the Week\n"
-        "/cancel — Kanselahin ang kasalukuyang entry",
+        "/week — Current week\n"
+        "/week 01 — Specific week\n"
+        "/week 34 2026 — Specific week + year\n"
+        "/cancel — Kanselahin ang entry",
 
         parse_mode="Markdown",
 
@@ -303,7 +363,7 @@ async def start(
 
 
 # ============================================================
-# ADD — CHOOSE TYPE
+# ADD
 # ============================================================
 
 async def add_start(
@@ -316,6 +376,7 @@ async def add_start(
     keyboard = [
         ["🏠 FAMILY"],
         ["👤 INDIVIDUAL"],
+        ["❌ CANCEL"],
     ]
 
     await update.message.reply_text(
@@ -337,51 +398,70 @@ async def add_start(
     return VISIT_TYPE
 
 
+# ============================================================
+# VISIT TYPE
+# ============================================================
+
 async def get_visit_type(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
 
-    visit_type = update.message.text.strip()
+    choice = update.message.text.strip()
 
-    if visit_type == "🏠 FAMILY":
+    if choice == "❌ CANCEL":
+
+        return await cancel(
+            update,
+            context
+        )
+
+    if choice == "🏠 FAMILY":
 
         context.user_data["visit_type"] = "FAMILY"
 
         await update.message.reply_text(
 
             "🏠 **FAMILY VISITATION**\n\n"
+
             "Ilagay ang **Family / Household Name**.\n\n"
-            "Halimbawa: Dela Cruz Family",
+
+            "Halimbawa:\n"
+            "Dela Cruz Family",
 
             parse_mode="Markdown",
+
+            reply_markup=cancel_keyboard(),
         )
 
         return FAMILY_NAME
 
-    if visit_type == "👤 INDIVIDUAL":
+    if choice == "👤 INDIVIDUAL":
 
         context.user_data["visit_type"] = "INDIVIDUAL"
 
         await update.message.reply_text(
 
             "👤 **INDIVIDUAL VISITATION**\n\n"
+
             "Ilagay ang pangalan:",
 
             parse_mode="Markdown",
+
+            reply_markup=cancel_keyboard(),
         )
 
         return IND_NAME
 
     await update.message.reply_text(
-        "❌ Piliin lamang ang FAMILY o INDIVIDUAL."
+        "❌ Piliin ang FAMILY o INDIVIDUAL."
     )
 
     return VISIT_TYPE
 
 
 # ============================================================
-# FAMILY
+# FAMILY NAME
 # ============================================================
 
 async def get_family_name(
@@ -389,29 +469,44 @@ async def get_family_name(
     context: ContextTypes.DEFAULT_TYPE,
 ):
 
-    family_name = update.message.text.strip()
+    text = update.message.text.strip()
 
-    if not family_name:
+    if text == "❌ CANCEL":
+
+        return await cancel(
+            update,
+            context
+        )
+
+    if not text:
 
         await update.message.reply_text(
-            "❌ Pakilagay ang Family / Household Name."
+            "❌ Pakilagay ang Family / Household Name.",
+            reply_markup=cancel_keyboard()
         )
 
         return FAMILY_NAME
 
-    context.user_data["family_name"] = family_name
+    context.user_data["family_name"] = text
 
     await update.message.reply_text(
 
         "👨 **TATAY**\n\n"
+
         "Ilagay ang pangalan ng tatay.\n"
         "Kung wala, i-type ang `None`.",
 
         parse_mode="Markdown",
+
+        reply_markup=cancel_keyboard(),
     )
 
     return FATHER
 
+
+# ============================================================
+# FATHER
+# ============================================================
 
 async def get_father(
     update: Update,
@@ -420,7 +515,15 @@ async def get_father(
 
     father = update.message.text.strip()
 
+    if father == "❌ CANCEL":
+
+        return await cancel(
+            update,
+            context
+        )
+
     if father.lower() == "none":
+
         father = ""
 
     context.user_data["father"] = father
@@ -428,14 +531,21 @@ async def get_father(
     await update.message.reply_text(
 
         "👩 **NANAY**\n\n"
+
         "Ilagay ang pangalan ng nanay.\n"
         "Kung wala, i-type ang `None`.",
 
         parse_mode="Markdown",
+
+        reply_markup=cancel_keyboard(),
     )
 
     return MOTHER
 
+
+# ============================================================
+# MOTHER
+# ============================================================
 
 async def get_mother(
     update: Update,
@@ -444,7 +554,15 @@ async def get_mother(
 
     mother = update.message.text.strip()
 
+    if mother == "❌ CANCEL":
+
+        return await cancel(
+            update,
+            context
+        )
+
     if mother.lower() == "none":
+
         mother = ""
 
     context.user_data["mother"] = mother
@@ -452,17 +570,27 @@ async def get_mother(
     await update.message.reply_text(
 
         "👦 **MGA ANAK**\n\n"
+
         "Ilagay ang mga anak.\n\n"
+
         "Kung maraming anak, paghiwalayin gamit ang comma.\n\n"
+
         "Halimbawa:\n"
         "Judas Dela Cruz, Marcos Dela Cruz\n\n"
+
         "Kung walang anak, i-type ang `None`.",
 
         parse_mode="Markdown",
+
+        reply_markup=cancel_keyboard(),
     )
 
     return CHILDREN
 
+
+# ============================================================
+# CHILDREN
+# ============================================================
 
 async def get_children(
     update: Update,
@@ -471,27 +599,38 @@ async def get_children(
 
     children = update.message.text.strip()
 
+    if children == "❌ CANCEL":
+
+        return await cancel(
+            update,
+            context
+        )
+
     if children.lower() == "none":
+
         children = ""
 
     context.user_data["children"] = children
 
     await update.message.reply_text(
 
-        "📅 Ilagay ang **Date Visited**.\n\n"
-        "Format: YYYY-MM-DD\n"
-        "Halimbawa: 2026-08-19",
+        "📅 **DATE VISITED**\n\n"
+
+        "Format: YYYY-MM-DD\n\n"
+
+        "Halimbawa:\n"
+        "2026-08-19",
 
         parse_mode="Markdown",
 
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=cancel_keyboard(),
     )
 
     return DATE
 
 
 # ============================================================
-# INDIVIDUAL
+# INDIVIDUAL NAME
 # ============================================================
 
 async def get_individual_name(
@@ -501,10 +640,18 @@ async def get_individual_name(
 
     name = update.message.text.strip()
 
+    if name == "❌ CANCEL":
+
+        return await cancel(
+            update,
+            context
+        )
+
     if not name:
 
         await update.message.reply_text(
-            "❌ Pakilagay ang pangalan."
+            "❌ Pakilagay ang pangalan.",
+            reply_markup=cancel_keyboard()
         )
 
         return IND_NAME
@@ -513,13 +660,16 @@ async def get_individual_name(
 
     await update.message.reply_text(
 
-        "📅 Ilagay ang **Date Visited**.\n\n"
-        "Format: YYYY-MM-DD\n"
-        "Halimbawa: 2026-08-19",
+        "📅 **DATE VISITED**\n\n"
+
+        "Format: YYYY-MM-DD\n\n"
+
+        "Halimbawa:\n"
+        "2026-08-19",
 
         parse_mode="Markdown",
 
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=cancel_keyboard(),
     )
 
     return DATE
@@ -536,11 +686,18 @@ async def get_date(
 
     date_text = update.message.text.strip()
 
+    if date_text == "❌ CANCEL":
+
+        return await cancel(
+            update,
+            context
+        )
+
     try:
 
         datetime.strptime(
             date_text,
-            "%Y-%m-%d",
+            "%Y-%m-%d"
         )
 
     except ValueError:
@@ -548,10 +705,14 @@ async def get_date(
         await update.message.reply_text(
 
             "❌ Mali ang date format.\n\n"
+
             "Gamitin:\n"
             "YYYY-MM-DD\n\n"
+
             "Halimbawa:\n"
             "2026-08-19",
+
+            reply_markup=cancel_keyboard()
         )
 
         return DATE
@@ -559,13 +720,15 @@ async def get_date(
     context.user_data["date"] = date_text
 
     keyboard = [
-        [purok]
-        for purok in PUROK_GROUPS
+        ["2-1"],
+        ["2-2"],
+        ["2-3"],
+        ["❌ CANCEL"],
     ]
 
     await update.message.reply_text(
 
-        "📍 Piliin ang **Purok-Grupo**:",
+        "📍 **PILIIN ANG PUROK-GRUPO:**",
 
         parse_mode="Markdown",
 
@@ -590,6 +753,13 @@ async def get_purok(
 
     purok = update.message.text.strip()
 
+    if purok == "❌ CANCEL":
+
+        return await cancel(
+            update,
+            context
+        )
+
     if purok not in PUROK_GROUPS:
 
         await update.message.reply_text(
@@ -598,6 +768,8 @@ async def get_purok(
             "2-1\n"
             "2-2\n"
             "2-3",
+
+            reply_markup=cancel_keyboard()
         )
 
         return PUROK
@@ -606,12 +778,15 @@ async def get_purok(
 
     await update.message.reply_text(
 
-        "📌 Ilagay ang **Notes**.\n\n"
+        "📌 **NOTES**\n\n"
+
+        "Ilagay ang notes.\n\n"
+
         "Kung walang notes, i-type ang `None`.",
 
         parse_mode="Markdown",
 
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=cancel_keyboard(),
     )
 
     return NOTES
@@ -628,7 +803,15 @@ async def get_notes(
 
     notes = update.message.text.strip()
 
+    if notes == "❌ CANCEL":
+
+        return await cancel(
+            update,
+            context
+        )
+
     if notes.lower() == "none":
+
         notes = ""
 
     context.user_data["notes"] = notes
@@ -636,7 +819,7 @@ async def get_notes(
     visit_type = context.user_data["visit_type"]
 
     # --------------------------------------------------------
-    # SAVE FAMILY
+    # FAMILY
     # --------------------------------------------------------
 
     if visit_type == "FAMILY":
@@ -658,27 +841,33 @@ async def get_notes(
             context.user_data["notes"],
         )
 
-        family_name = context.user_data["family_name"]
-        father = context.user_data["father"]
-        mother = context.user_data["mother"]
-        children = context.user_data["children"]
-
         text = (
+
             "✅ **FAMILY VISITATION SAVED!**\n\n"
 
-            f"🏠 **{family_name}**\n\n"
+            f"🏠 **{context.user_data['family_name']}**\n\n"
 
-            f"👨 Tatay: {father or 'None'}\n"
-            f"👩 Nanay: {mother or 'None'}\n"
-            f"👦 Mga Anak: {children or 'None'}\n\n"
+            f"👨 Tatay: "
+            f"{context.user_data['father'] or 'None'}\n"
 
-            f"📅 Date: {context.user_data['date']}\n"
-            f"📍 Purok-Grupo: {context.user_data['purok']}\n"
-            f"📝 Notes: {context.user_data['notes'] or 'None'}"
+            f"👩 Nanay: "
+            f"{context.user_data['mother'] or 'None'}\n"
+
+            f"👦 Mga Anak: "
+            f"{context.user_data['children'] or 'None'}\n\n"
+
+            f"📅 Date: "
+            f"{context.user_data['date']}\n"
+
+            f"📍 Purok-Grupo: "
+            f"{context.user_data['purok']}\n"
+
+            f"📝 Notes: "
+            f"{context.user_data['notes'] or 'None'}"
         )
 
     # --------------------------------------------------------
-    # SAVE INDIVIDUAL
+    # INDIVIDUAL
     # --------------------------------------------------------
 
     else:
@@ -695,21 +884,33 @@ async def get_notes(
         )
 
         text = (
+
             "✅ **INDIVIDUAL VISITATION SAVED!**\n\n"
 
-            f"👤 **{context.user_data['individual_name']}**\n\n"
+            f"👤 **"
+            f"{context.user_data['individual_name']}"
+            f"**\n\n"
 
-            f"📅 Date: {context.user_data['date']}\n"
-            f"📍 Purok-Grupo: {context.user_data['purok']}\n"
-            f"📝 Notes: {context.user_data['notes'] or 'None'}"
+            f"📅 Date: "
+            f"{context.user_data['date']}\n"
+
+            f"📍 Purok-Grupo: "
+            f"{context.user_data['purok']}\n"
+
+            f"📝 Notes: "
+            f"{context.user_data['notes'] or 'None'}"
         )
 
-    await update.message.reply_text(
-        text,
-        parse_mode="Markdown",
-    )
-
     context.user_data.clear()
+
+    await update.message.reply_text(
+
+        text,
+
+        parse_mode="Markdown",
+
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
     return ConversationHandler.END
 
@@ -727,7 +928,10 @@ async def cancel(
 
     await update.message.reply_text(
 
-        "❌ Visitation entry cancelled.",
+        "❌ **VISITATION CANCELLED**\n\n"
+        "Walang record na na-save.",
+
+        parse_mode="Markdown",
 
         reply_markup=ReplyKeyboardRemove(),
     )
@@ -736,10 +940,13 @@ async def cancel(
 
 
 # ============================================================
-# DISPLAY ONE RECORD
+# FORMAT RECORD
 # ============================================================
 
-def format_record(row):
+def format_record(
+    row,
+    show_week=True
+):
 
     (
         record_id,
@@ -754,34 +961,72 @@ def format_record(row):
         notes,
     ) = row
 
+    visit_date = datetime.strptime(
+        date,
+        "%Y-%m-%d"
+    ).date()
+
+    iso_year, iso_week, _ = (
+        visit_date.isocalendar()
+    )
+
+    week_text = ""
+
+    if show_week:
+
+        week_text = (
+            f"🔢 Year: {iso_year} | "
+            f"Week: {iso_week:02d}\n"
+        )
+
     if visit_type == "FAMILY":
 
         return (
+
             f"#{record_id}\n"
+
             f"🏠 **{household_name}**\n\n"
 
-            f"👨 Tatay: {father or 'None'}\n"
-            f"👩 Nanay: {mother or 'None'}\n"
-            f"👦 Mga Anak: {children or 'None'}\n\n"
+            f"👨 Tatay: "
+            f"{father or 'None'}\n"
+
+            f"👩 Nanay: "
+            f"{mother or 'None'}\n"
+
+            f"👦 Mga Anak: "
+            f"{children or 'None'}\n\n"
 
             f"📅 {date}\n"
+
+            f"{week_text}"
+
             f"📍 {purok}\n"
+
             f"📝 {notes or 'None'}\n"
+
             "──────────────\n"
         )
 
     return (
+
         f"#{record_id}\n"
+
         f"👤 **{individual_name}**\n"
+
         f"📅 {date}\n"
+
+        f"{week_text}"
+
         f"📍 {purok}\n"
+
         f"📝 {notes or 'None'}\n"
+
         "──────────────\n"
     )
 
 
 # ============================================================
-# ALL RECORDS
+# RECORDS
 # ============================================================
 
 async def records(
@@ -805,9 +1050,10 @@ async def records(
 
     for row in rows:
 
-        text += format_record(row)
-
-    # Telegram message limit
+        text += format_record(
+            row,
+            show_week=True
+        )
 
     chunks = []
 
@@ -816,7 +1062,7 @@ async def records(
         split_at = text.rfind(
             "\n",
             0,
-            4000,
+            4000
         )
 
         if split_at == -1:
@@ -834,12 +1080,12 @@ async def records(
 
         await update.message.reply_text(
             chunk,
-            parse_mode="Markdown",
+            parse_mode="Markdown"
         )
 
 
 # ============================================================
-# VISITED OF THE WEEK
+# WEEK
 # ============================================================
 
 async def week(
@@ -847,44 +1093,171 @@ async def week(
     context: ContextTypes.DEFAULT_TYPE,
 ):
 
-    (
-        rows,
-        iso_year,
-        iso_week,
-        start,
-        end,
-    ) = get_week_visits()
+    today = datetime.now().date()
+
+    current_year, current_week, _ = (
+        today.isocalendar()
+    )
+
+    # --------------------------------------------------------
+    # /week
+    # --------------------------------------------------------
+
+    if not context.args:
+
+        year = current_year
+        week_number = current_week
+
+    # --------------------------------------------------------
+    # /week 34
+    # --------------------------------------------------------
+
+    elif len(context.args) == 1:
+
+        try:
+
+            week_number = int(
+                context.args[0]
+            )
+
+        except ValueError:
+
+            await update.message.reply_text(
+
+                "❌ Mali ang week number.\n\n"
+
+                "Halimbawa:\n"
+                "/week 01\n"
+                "/week 34\n"
+                "/week 53"
+            )
+
+            return
+
+        year = current_year
+
+    # --------------------------------------------------------
+    # /week 34 2026
+    # --------------------------------------------------------
+
+    elif len(context.args) == 2:
+
+        try:
+
+            week_number = int(
+                context.args[0]
+            )
+
+            year = int(
+                context.args[1]
+            )
+
+        except ValueError:
+
+            await update.message.reply_text(
+
+                "❌ Mali ang format.\n\n"
+
+                "Gamitin:\n"
+                "/week 34 2026"
+            )
+
+            return
+
+    else:
+
+        await update.message.reply_text(
+
+            "❌ Mali ang format.\n\n"
+
+            "Gamitin:\n\n"
+
+            "/week\n"
+            "/week 01\n"
+            "/week 34\n"
+            "/week 34 2026"
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # VALIDATE
+    # --------------------------------------------------------
+
+    start, end = get_week_dates(
+        year,
+        week_number
+    )
+
+    if not start:
+
+        await update.message.reply_text(
+
+            f"❌ Week {week_number:02d} "
+            f"ay hindi valid para sa {year}."
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # DATABASE
+    # --------------------------------------------------------
+
+    rows, start, end = get_week_visits(
+        year,
+        week_number
+    )
+
+    # --------------------------------------------------------
+    # HEADER
+    # --------------------------------------------------------
 
     text = (
 
         "🏆 **VISITED OF THE WEEK**\n\n"
 
-        f"📅 **YEAR: {iso_year}**\n"
-        f"🔢 **WEEK: {iso_week}**\n"
+        f"📅 **YEAR: {year}**\n"
+
+        f"🔢 **WEEK: {week_number:02d}**\n"
 
         f"📆 {start.strftime('%B %d, %Y')}"
         f" – {end.strftime('%B %d, %Y')}\n\n"
     )
 
+    # --------------------------------------------------------
+    # EMPTY
+    # --------------------------------------------------------
+
     if not rows:
 
         text += (
             "📂 Wala pang visitation "
-            "record ngayong linggo."
+            f"record sa Week {week_number:02d}."
         )
 
         await update.message.reply_text(
+
             text,
-            parse_mode="Markdown",
+
+            parse_mode="Markdown"
         )
 
         return
 
+    # --------------------------------------------------------
+    # RECORDS
+    # --------------------------------------------------------
+
     for row in rows:
 
-        text += format_record(row)
+        text += format_record(
+            row,
+            show_week=False
+        )
 
-    # Telegram message limit
+    # --------------------------------------------------------
+    # SEND
+    # --------------------------------------------------------
 
     chunks = []
 
@@ -893,7 +1266,7 @@ async def week(
         split_at = text.rfind(
             "\n",
             0,
-            4000,
+            4000
         )
 
         if split_at == -1:
@@ -911,7 +1284,7 @@ async def week(
 
         await update.message.reply_text(
             chunk,
-            parse_mode="Markdown",
+            parse_mode="Markdown"
         )
 
 
@@ -933,7 +1306,7 @@ def main():
 
     threading.Thread(
         target=run_web_server,
-        daemon=True,
+        daemon=True
     ).start()
 
     # Telegram application
@@ -945,16 +1318,14 @@ def main():
         .build()
     )
 
-    # --------------------------------------------------------
-    # CONVERSATION
-    # --------------------------------------------------------
+    # Conversation
 
     conversation = ConversationHandler(
 
         entry_points=[
             CommandHandler(
                 "add",
-                add_start,
+                add_start
             )
         ],
 
@@ -962,64 +1333,73 @@ def main():
 
             VISIT_TYPE: [
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    get_visit_type,
+                    filters.TEXT
+                    & ~filters.COMMAND,
+                    get_visit_type
                 )
             ],
 
             FAMILY_NAME: [
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    get_family_name,
+                    filters.TEXT
+                    & ~filters.COMMAND,
+                    get_family_name
                 )
             ],
 
             FATHER: [
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    get_father,
+                    filters.TEXT
+                    & ~filters.COMMAND,
+                    get_father
                 )
             ],
 
             MOTHER: [
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    get_mother,
+                    filters.TEXT
+                    & ~filters.COMMAND,
+                    get_mother
                 )
             ],
 
             CHILDREN: [
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    get_children,
+                    filters.TEXT
+                    & ~filters.COMMAND,
+                    get_children
                 )
             ],
 
             IND_NAME: [
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    get_individual_name,
+                    filters.TEXT
+                    & ~filters.COMMAND,
+                    get_individual_name
                 )
             ],
 
             DATE: [
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    get_date,
+                    filters.TEXT
+                    & ~filters.COMMAND,
+                    get_date
                 )
             ],
 
             PUROK: [
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    get_purok,
+                    filters.TEXT
+                    & ~filters.COMMAND,
+                    get_purok
                 )
             ],
 
             NOTES: [
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND,
-                    get_notes,
+                    filters.TEXT
+                    & ~filters.COMMAND,
+                    get_notes
                 )
             ],
         },
@@ -1027,43 +1407,37 @@ def main():
         fallbacks=[
             CommandHandler(
                 "cancel",
-                cancel,
+                cancel
             )
         ],
     )
 
-    # --------------------------------------------------------
-    # COMMANDS
-    # --------------------------------------------------------
+    # Commands
 
     app.add_handler(
         CommandHandler(
             "start",
-            start,
+            start
         )
     )
 
     app.add_handler(
         CommandHandler(
             "records",
-            records,
+            records
         )
     )
 
     app.add_handler(
         CommandHandler(
             "week",
-            week,
+            week
         )
     )
 
     app.add_handler(
         conversation
     )
-
-    # --------------------------------------------------------
-    # START BOT
-    # --------------------------------------------------------
 
     print(
         "Visitation Bot is running..."
