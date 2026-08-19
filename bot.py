@@ -65,22 +65,42 @@ def cancel_keyboard():
 
 
 # ============================================================
-# RENDER HEALTH SERVER
+# RENDER KEEP-ALIVE / HEALTH SERVER
 # ============================================================
 
 class HealthHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
-        self.send_response(200)
-        self.send_header(
-            "Content-Type",
-            "text/plain"
-        )
-        self.end_headers()
 
-        self.wfile.write(
-            b"Visitation Bot is running!"
-        )
+        if self.path == "/" or self.path == "/health":
+
+            self.send_response(200)
+
+            self.send_header(
+                "Content-Type",
+                "text/plain; charset=utf-8"
+            )
+
+            self.end_headers()
+
+            self.wfile.write(
+                b"Visitation Bot is running! OK"
+            )
+
+        else:
+
+            self.send_response(404)
+
+            self.send_header(
+                "Content-Type",
+                "text/plain; charset=utf-8"
+            )
+
+            self.end_headers()
+
+            self.wfile.write(
+                b"Not Found"
+            )
 
     def log_message(self, format, *args):
         return
@@ -98,6 +118,10 @@ def run_web_server():
     server = HTTPServer(
         ("0.0.0.0", port),
         HealthHandler,
+    )
+
+    print(
+        f"Health server running on port {port}"
     )
 
     server.serve_forever()
@@ -1302,14 +1326,18 @@ def main():
 
     init_db()
 
-    # Render health server
+    # --------------------------------------------------------
+    # START RENDER HEALTH SERVER
+    # --------------------------------------------------------
 
     threading.Thread(
         target=run_web_server,
         daemon=True
     ).start()
 
-    # Telegram application
+    # --------------------------------------------------------
+    # TELEGRAM APPLICATION
+    # --------------------------------------------------------
 
     app = (
         Application
@@ -1318,7 +1346,9 @@ def main():
         .build()
     )
 
-    # Conversation
+    # --------------------------------------------------------
+    # CONVERSATION
+    # --------------------------------------------------------
 
     conversation = ConversationHandler(
 
@@ -1412,7 +1442,9 @@ def main():
         ],
     )
 
-    # Commands
+    # --------------------------------------------------------
+    # COMMANDS
+    # --------------------------------------------------------
 
     app.add_handler(
         CommandHandler(
